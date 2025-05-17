@@ -82,9 +82,10 @@ with tab1:
 
 
     if state.get("show_form"):
-        st.subheader("📘 Select a Related Word")
+        st.subheader("📘 Select a Related Prompt")
         with st.form("word_form"):
-            # stable widget key + no blank prompts
+
+            #Choose one of the generated prompts
             choice = st.radio("Choose one:", state.related_words, key="related_word_radio")
 
             if st.form_submit_button("Submit"):
@@ -94,19 +95,22 @@ with tab1:
                 #Sanity check
                 if not choice:
                     st.error("That option was blank! Please pick another.")
+
+                #Begin summarization of the 5 selected articles.
                 else:
                     with st.spinner("Fetching links & summaries… It'll be worth the wait!"):
                         state.links = search.searchLinks(choice)
                         state.links_and_summaries = search.summarizeArticles(state.links)
 
+                    #Update page state to remove the generated prompts and add the select a link section..
                     state.show_links = True
                     state.show_form = False
+
+                    #Force page to update.
                     st.rerun()
 
 
     # -- LINK AND SUMMARIZATION SELECTION -- #
-
-
 
     if state.get("show_links"):
         st.subheader("🔗 Select Your Links")
@@ -118,18 +122,20 @@ with tab1:
             #Loop through the links and summaries that're stored.
             for idx, (url, summary) in enumerate(state.links_and_summaries):
 
-                #Create an expander for each link (indx+1 to avoid 0-4)
+                #Create an expander for each link (indx+1 to avoid 0-4 and give 1-5)
                 with st.expander(f"Link {idx+1}", expanded=True):
                     st.markdown(f"**URL:** {url}\n\n**Summary:** {summary}")
                     if st.checkbox("Use this link", key=f"chk_{idx}"):
                         indices.append(idx)
 
+            #When they click submit, check to make sure they selected a link
             if st.form_submit_button("Submit"):
                 if not indices:
                     st.warning("Pick at least one link.")
+
+                #Else continue down pipeline
                 else:
                     state.selected_indices = indices
-
 
                     #Save URLs for later usage
                     state.selected_links = [state.links[i] for i in indices]
@@ -140,6 +146,8 @@ with tab1:
 
                     #Refresh page & display success
                     st.success(f"Selected {len(indices)} link(s).")
+
+                    #Force update
                     st.rerun()
 
 
@@ -149,27 +157,41 @@ with tab1:
 
     # Shared summary creation before either form
     if not state.summarized_text:
+        
+        #Only get summaries and join them into a single large text summary.
         joined = " ".join(summary for idx, (url, summary) in enumerate(state.links_and_summaries) if idx in state.selected_indices)
         state.summarized_text = search.summarize(joined, num_sentences=8)
 
 
+
     # -- CHAT SECTION -- #
+
+
     if state.get("showOption") and typeSelection == "Summarize + Chat":
         with st.form("word_form3"):
+
+            #Page formatting, giving large text summary.
             st.subheader("Here's a summary of your selections!")
             st.markdown(f"You searched for: **{state.selected_keyword}**")
             st.markdown(f"**Overall Selected Summary:**\n{state.summarized_text}")
 
+            #Input box
             question = st.text_input(
                 "Ask me any questions about your topic:",
                 placeholder="'How does X relate to Y?'"
             )
 
+
             if st.form_submit_button("Ask"):
+                #Check to make sure input
                 if not question:
                     st.warning("Please ask a question.")
+
+                #Make sure it passes the filter..
                 elif not gpt.filter(question):
                     st.warning("Question not appropriate. Try another one.")
+
+                #Otherwise submit the user's question to a prompt.
                 else:
                     prompt = f"""
                     You're in a position where someone is going to ask you questions about a topic.
@@ -186,23 +208,50 @@ with tab1:
                     st.success(f"Good question! {answer}")
 
 
+
     # -- QUIZ SECTION -- #
+
+
     if state.get("showOption") and typeSelection == "Self assessment":
+
         # Only generate quiz once
         if "quiz_data" not in st.session_state:
+
+            #Call quiz generation such that it'll be formatted for processing..
             quiz = gpt.quizGeneration(state.summarized_text)
+
+            #Then taking the format we're goign to split it up into sentences.
+            #It'll be formated as such:
+            #1. Q1..
+            #2. Q2..
+            #etc...
             questions = re.split(r'\n?\d+\.\s*', quiz.strip())
             questions = [q for q in questions if q.strip()]
 
+
             formatted_questions = []
+            
+            #Takes the questions and formats them into the quiz ready form..
             for q in questions:
+                #Removes the formatting between questions and options
                 parts = q.strip().split("::")
+
+                #Ensures that there's no spacing between seperation
                 question = parts[0].strip()
+
+                #Removes the answer key from options
                 choices = [c.replace("(correct)", "").strip() for c in parts[1:]]
+
+                #Finds correct tag
                 correct_raw = next((c for c in parts[1:] if "(correct)" in c), None)
+
+                #Cleans The answer again or marks it as missing
                 correct = correct_raw.replace("(correct)", "").strip() if correct_raw else "Missing"
+
+                #Adds correct answer to the end to be read later.
                 formatted_questions.append([question] + choices + [correct])
 
+            #Saves questions
             st.session_state.quiz_data = formatted_questions
 
         questions = st.session_state.quiz_data
@@ -210,6 +259,7 @@ with tab1:
         if "answers" not in st.session_state:
             st.session_state.answers = {}
 
+        #Creates the quiz
         with st.form("quiz_form"):
             for i, q in enumerate(questions[1:]):
                 st.subheader(f"Question {i+1}")
@@ -219,15 +269,18 @@ with tab1:
 
             submit_quiz = st.form_submit_button("Submit Quiz")
 
+        #Generates answer section for user to check their answers.
         if submit_quiz:
             score = 0
             st.markdown("---")
             st.header("📊 Results")
 
+            #Loops through answers...
             for i, q in enumerate(questions[1:]):
                 user_ans = st.session_state.answers.get(i)
                 correct_ans = q[5]
 
+                #Compares the correct answer from end of array with user's choice..
                 if user_ans == correct_ans:
                     st.success(f"✅ Question {i+1}: Correct\n\n**Your answer:** {user_ans}")
                     score += 1
@@ -244,6 +297,8 @@ with tab1:
 
     if state.get("showOption") and typeSelection == "Cite a source":
         if not state.citations:
+
+            #Fairly simple, since chatGPT can now access webpages, it'll just grab the info quickly because of the inconsistency of other citation libraries
             state.citations = gpt.askGptText(f"""Here are the links I have selected: {state.selected_links}
                     Can you generate a MLA citation for each link.
                     Return only the link and then the citation.

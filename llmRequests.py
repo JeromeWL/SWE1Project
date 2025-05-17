@@ -44,7 +44,7 @@ class gptPrompting:
         """)
         return generatedPrompts
     
-
+    #Generate the quiz and formats it such to be processed into a list later.
     def quizGeneration(self, largeSummary):
         return self.askGptText(f"""Here are the links I have selected: {largeSummary}
             Can you generate 5 questions to quiz my understanding of the topics found in these links?
